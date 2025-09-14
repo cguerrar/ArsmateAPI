@@ -1,330 +1,505 @@
-﻿using Microsoft.AspNetCore.Authorization;
+﻿// Controllers/AuthController.cs - VERSIÓN FINAL
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.EntityFrameworkCore;
 using System.Security.Claims;
-using Arsmate.Core.DTOs.Auth;
-using Arsmate.Core.DTOs.Common;
+using System.Security.Cryptography;
+using System.Text;
+using Arsmate.Core.Entities;
 using Arsmate.Core.Interfaces;
+using Arsmate.Infrastructure.Data;
+using ArsmateAPI.DTOs;
 
-namespace Arsmate.API.Controllers
+namespace ArsmateAPI.Controllers
 {
-
     [ApiController]
     [Route("api/[controller]")]
     public class AuthController : ControllerBase
     {
-        private readonly IAuthService _authService;
+        private readonly ArsmateDbContext _context;
+        private readonly IConfiguration _configuration;
         private readonly ILogger<AuthController> _logger;
+        private readonly ITokenService _tokenService;
 
-        public AuthController(IAuthService authService, ILogger<AuthController> logger)
+        public AuthController(
+            ArsmateDbContext context,
+            IConfiguration configuration,
+            ILogger<AuthController> logger,
+            ITokenService tokenService)
         {
-            _authService = authService;
+            _context = context;
+            _configuration = configuration;
             _logger = logger;
+            _tokenService = tokenService;
         }
 
-        /// <summary>
-        /// Register a new user
-        /// </summary>
-        [HttpPost("register")]
-        [ProducesResponseType(typeof(ApiResponseDto<TokenResponseDto>), 200)]
-        [ProducesResponseType(typeof(ApiResponseDto<object>), 400)]
-        public async Task<IActionResult> Register([FromBody] RegisterDto registerDto)
-        {
-            try
-            {
-                if (!ModelState.IsValid)
-                {
-                    return BadRequest(ApiResponseDto<object>.ErrorResponse(
-                        "Invalid data provided"));
-                }
-
-                var result = await _authService.RegisterAsync(registerDto);
-
-                _logger.LogInformation($"New user registered: {registerDto.Username}");
-
-                return Ok(ApiResponseDto<TokenResponseDto>.SuccessResponse(
-                    result,
-                    "Registration successful. Please check your email to confirm your account."));
-            }
-            catch (InvalidOperationException ex)
-            {
-                return BadRequest(ApiResponseDto<object>.ErrorResponse(ex.Message));
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error during registration");
-                return StatusCode(500, ApiResponseDto<object>.ErrorResponse(
-                    "An error occurred during registration"));
-            }
-        }
-
-        /// <summary>
-        /// Login with username/email and password
-        /// </summary>
+        // POST: api/auth/login
         [HttpPost("login")]
-        [ProducesResponseType(typeof(ApiResponseDto<TokenResponseDto>), 200)]
-        [ProducesResponseType(typeof(ApiResponseDto<object>), 401)]
-        public async Task<IActionResult> Login([FromBody] LoginDto loginDto)
+        [AllowAnonymous]
+        public async Task<IActionResult> Login([FromBody] LoginDto dto)
         {
             try
             {
-                if (!ModelState.IsValid)
+                _logger.LogInformation("Intento de login para: {EmailOrUsername}", dto?.EmailOrUsername);
+
+                // Validar entrada
+                if (dto == null || string.IsNullOrEmpty(dto.EmailOrUsername))
                 {
-                    return BadRequest(ApiResponseDto<object>.ErrorResponse(
-                        "Invalid data provided"));
+                    return BadRequest(new AuthResponseDto
+                    {
+                        Success = false,
+                        Message = "Datos de login inválidos"
+                    });
                 }
 
-                // Add IP address for security logging
-                loginDto.IpAddress = HttpContext.Connection.RemoteIpAddress?.ToString();
+                // Buscar usuario
+                var normalizedInput = dto.EmailOrUsername.ToLower().Trim();
+                var user = await _context.Users
+                    .FirstOrDefaultAsync(u =>
+                        u.Username.ToLower() == normalizedInput ||
+                        u.Email.ToLower() == normalizedInput);
 
-                var result = await _authService.LoginAsync(loginDto);
+                if (user == null)
+                {
+                    _logger.LogWarning("Usuario no encontrado: {EmailOrUsername}", dto.EmailOrUsername);
 
-                return Ok(ApiResponseDto<TokenResponseDto>.SuccessResponse(
-                    result,
-                    "Login successful"));
-            }
-            catch (UnauthorizedAccessException ex)
-            {
-                return Unauthorized(ApiResponseDto<object>.ErrorResponse(ex.Message));
+                    // Log para debug
+                    var userCount = await _context.Users.CountAsync();
+                    _logger.LogInformation("Total de usuarios en BD: {Count}", userCount);
+
+                    return Unauthorized(new AuthResponseDto
+                    {
+                        Success = false,
+                        Message = "Credenciales inválidas"
+                    });
+                }
+
+                _logger.LogInformation("Usuario encontrado: {Username}", user.Username);
+
+                // Verificar contraseña
+                if (!VerifyPassword(dto.Password, user.PasswordHash))
+                {
+                    _logger.LogWarning("Contraseña incorrecta para usuario: {Username}", user.Username);
+                    return Unauthorized(new AuthResponseDto
+                    {
+                        Success = false,
+                        Message = "Credenciales inválidas"
+                    });
+                }
+
+                _logger.LogInformation("Login exitoso para usuario: {Username}", user.Username);
+
+                // Generar tokens usando ITokenService
+                var accessToken = _tokenService.GenerateAccessToken(user);
+                var refreshToken = _tokenService.GenerateRefreshToken();
+
+                // Calcular fecha de expiración
+                var expiresInMinutes = Convert.ToDouble(_configuration["Jwt:ExpiresInMinutes"] ?? "60");
+                var expiresAt = DateTime.UtcNow.AddMinutes(expiresInMinutes);
+
+                return Ok(new AuthResponseDto
+                {
+                    Success = true,
+                    Message = "Login exitoso",
+                    Data = new AuthDataDto
+                    {
+                        AccessToken = accessToken,
+                        RefreshToken = refreshToken,
+                        ExpiresAt = expiresAt,
+                        TokenType = "Bearer",
+                        User = MapUserToDto(user)
+                    }
+                });
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error during login");
-                return StatusCode(500, ApiResponseDto<object>.ErrorResponse(
-                    "An error occurred during login"));
+                _logger.LogError(ex, "Error en login para: {EmailOrUsername}", dto?.EmailOrUsername);
+                return StatusCode(500, new AuthResponseDto
+                {
+                    Success = false,
+                    Message = "Error al iniciar sesión. Por favor, intente nuevamente."
+                });
             }
         }
 
-        /// <summary>
-        /// Refresh access token
-        /// </summary>
-        [HttpPost("refresh-token")]
-        [ProducesResponseType(typeof(ApiResponseDto<TokenResponseDto>), 200)]
-        [ProducesResponseType(typeof(ApiResponseDto<object>), 401)]
-        public async Task<IActionResult> RefreshToken([FromBody] RefreshTokenDto refreshTokenDto)
+        // POST: api/auth/register
+        [HttpPost("register")]
+        [AllowAnonymous]
+        public async Task<IActionResult> Register([FromBody] RegisterDto dto)
         {
             try
             {
-                var result = await _authService.RefreshTokenAsync(refreshTokenDto);
+                _logger.LogInformation("Iniciando registro para usuario: {Username}", dto?.Username);
 
-                return Ok(ApiResponseDto<TokenResponseDto>.SuccessResponse(result));
-            }
-            catch (UnauthorizedAccessException ex)
-            {
-                return Unauthorized(ApiResponseDto<object>.ErrorResponse(ex.Message));
+                // Validar modelo
+                if (!ModelState.IsValid)
+                {
+                    var errors = ModelState
+                        .SelectMany(x => x.Value.Errors)
+                        .Select(x => x.ErrorMessage)
+                        .ToList();
+
+                    return BadRequest(new AuthResponseDto
+                    {
+                        Success = false,
+                        Message = string.Join(", ", errors)
+                    });
+                }
+
+                // Verificar si el username ya existe
+                var usernameExists = await _context.Users
+                    .AnyAsync(u => u.Username.ToLower() == dto.Username.ToLower());
+
+                if (usernameExists)
+                {
+                    _logger.LogWarning("Username ya existe: {Username}", dto.Username);
+                    return BadRequest(new AuthResponseDto
+                    {
+                        Success = false,
+                        Message = "El nombre de usuario ya está en uso"
+                    });
+                }
+
+                // Verificar si el email ya existe
+                var emailExists = await _context.Users
+                    .AnyAsync(u => u.Email.ToLower() == dto.Email.ToLower());
+
+                if (emailExists)
+                {
+                    _logger.LogWarning("Email ya existe: {Email}", dto.Email);
+                    return BadRequest(new AuthResponseDto
+                    {
+                        Success = false,
+                        Message = "El email ya está registrado"
+                    });
+                }
+
+                // Crear el usuario
+                var user = new User
+                {
+                    Id = Guid.NewGuid(),
+                    Username = dto.Username.ToLower(),
+                    Email = dto.Email.ToLower(),
+                    PasswordHash = HashPassword(dto.Password),
+                    DisplayName = dto.DisplayName,
+                    IsCreator = dto.IsCreator,
+                    IsVerified = false,
+                    EmailConfirmed = false,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow,
+                    // Inicializar contadores
+                    FollowersCount = 0,
+                    FollowingCount = 0,
+                    PostsCount = 0
+                };
+
+                _context.Users.Add(user);
+                await _context.SaveChangesAsync();
+
+                _logger.LogInformation("Usuario registrado exitosamente: {UserId} - {Username}", user.Id, user.Username);
+
+                // Generar tokens
+                var accessToken = _tokenService.GenerateAccessToken(user);
+                var refreshToken = _tokenService.GenerateRefreshToken();
+
+                var expiresInMinutes = Convert.ToDouble(_configuration["Jwt:ExpiresInMinutes"] ?? "60");
+                var expiresAt = DateTime.UtcNow.AddMinutes(expiresInMinutes);
+
+                return Ok(new AuthResponseDto
+                {
+                    Success = true,
+                    Message = "Registro exitoso",
+                    Data = new AuthDataDto
+                    {
+                        AccessToken = accessToken,
+                        RefreshToken = refreshToken,
+                        ExpiresAt = expiresAt,
+                        TokenType = "Bearer",
+                        User = MapUserToDto(user)
+                    }
+                });
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error refreshing token");
-                return StatusCode(500, ApiResponseDto<object>.ErrorResponse(
-                    "An error occurred while refreshing token"));
+                _logger.LogError(ex, "Error en registro para usuario: {Username}", dto?.Username);
+                return StatusCode(500, new AuthResponseDto
+                {
+                    Success = false,
+                    Message = "Error al registrar el usuario. Por favor, intente nuevamente."
+                });
             }
         }
 
-        /// <summary>
-        /// Logout current user
-        /// </summary>
+        // POST: api/auth/refresh
+        [HttpPost("refresh")]
+        [AllowAnonymous]
+        public async Task<IActionResult> RefreshToken([FromBody] RefreshTokenDto dto)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(dto?.RefreshToken))
+                {
+                    return BadRequest(new AuthResponseDto
+                    {
+                        Success = false,
+                        Message = "Refresh token requerido"
+                    });
+                }
+
+                // Validar refresh token y obtener usuario
+                var user = await _tokenService.ValidateRefreshTokenAsync(dto.RefreshToken);
+
+                if (user == null)
+                {
+                    return Unauthorized(new AuthResponseDto
+                    {
+                        Success = false,
+                        Message = "Token inválido o expirado"
+                    });
+                }
+
+                // Generar nuevos tokens
+                var accessToken = _tokenService.GenerateAccessToken(user);
+                var refreshToken = _tokenService.GenerateRefreshToken();
+
+                var expiresInMinutes = Convert.ToDouble(_configuration["Jwt:ExpiresInMinutes"] ?? "60");
+                var expiresAt = DateTime.UtcNow.AddMinutes(expiresInMinutes);
+
+                return Ok(new AuthResponseDto
+                {
+                    Success = true,
+                    Message = "Token actualizado",
+                    Data = new AuthDataDto
+                    {
+                        AccessToken = accessToken,
+                        RefreshToken = refreshToken,
+                        ExpiresAt = expiresAt,
+                        TokenType = "Bearer",
+                        User = MapUserToDto(user)
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error refrescando token");
+                return StatusCode(500, new AuthResponseDto
+                {
+                    Success = false,
+                    Message = "Error al actualizar el token"
+                });
+            }
+        }
+
+        // POST: api/auth/logout
         [HttpPost("logout")]
         [Authorize]
-        [ProducesResponseType(typeof(ApiResponseDto<object>), 200)]
-        public async Task<IActionResult> Logout()
+        public IActionResult Logout()
         {
             try
             {
-                var username = User.Identity?.Name;
-                if (!string.IsNullOrEmpty(username))
-                {
-                    await _authService.RevokeTokenAsync(username);
-                }
+                // Aquí podrías invalidar el refresh token en la BD si lo estás guardando
+                var username = User.FindFirst(ClaimTypes.Name)?.Value;
+                _logger.LogInformation("Usuario {Username} cerró sesión", username);
 
-                return Ok(ApiResponseDto<object>.SuccessResponse(
-                    null,
-                    "Logged out successfully"));
+                return Ok(new { success = true, message = "Sesión cerrada exitosamente" });
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error during logout");
-                return StatusCode(500, ApiResponseDto<object>.ErrorResponse(
-                    "An error occurred during logout"));
+                _logger.LogError(ex, "Error en logout");
+                return StatusCode(500, new { success = false, message = "Error al cerrar sesión" });
             }
         }
 
-        /// <summary>
-        /// Request password reset
-        /// </summary>
-        [HttpPost("forgot-password")]
-        [ProducesResponseType(typeof(ApiResponseDto<object>), 200)]
-        public async Task<IActionResult> ForgotPassword([FromBody] ForgotPasswordDto forgotPasswordDto)
-        {
-            try
-            {
-                var token = await _authService.GeneratePasswordResetTokenAsync(forgotPasswordDto.Email);
-
-                // Always return success to prevent email enumeration
-                return Ok(ApiResponseDto<object>.SuccessResponse(
-                    null,
-                    "If the email exists, a password reset link has been sent."));
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error in forgot password");
-                return StatusCode(500, ApiResponseDto<object>.ErrorResponse(
-                    "An error occurred processing your request"));
-            }
-        }
-
-        /// <summary>
-        /// Reset password with token
-        /// </summary>
-        [HttpPost("reset-password")]
-        [ProducesResponseType(typeof(ApiResponseDto<object>), 200)]
-        [ProducesResponseType(typeof(ApiResponseDto<object>), 400)]
-        public async Task<IActionResult> ResetPassword([FromBody] ResetPasswordDto resetPasswordDto)
-        {
-            try
-            {
-                var result = await _authService.ResetPasswordAsync(resetPasswordDto);
-
-                if (!result)
-                {
-                    return BadRequest(ApiResponseDto<object>.ErrorResponse(
-                        "Invalid or expired token"));
-                }
-
-                return Ok(ApiResponseDto<object>.SuccessResponse(
-                    null,
-                    "Password reset successfully"));
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error resetting password");
-                return StatusCode(500, ApiResponseDto<object>.ErrorResponse(
-                    "An error occurred resetting password"));
-            }
-        }
-
-        /// <summary>
-        /// Change password for authenticated user
-        /// </summary>
-        [HttpPost("change-password")]
+        // GET: api/auth/me
+        [HttpGet("me")]
         [Authorize]
-        [ProducesResponseType(typeof(ApiResponseDto<object>), 200)]
-        [ProducesResponseType(typeof(ApiResponseDto<object>), 400)]
-        public async Task<IActionResult> ChangePassword([FromBody] ChangePasswordDto changePasswordDto)
+        public async Task<IActionResult> GetCurrentUser()
         {
             try
             {
-                var userId = Guid.Parse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? "");
-
-                var result = await _authService.ChangePasswordAsync(userId, changePasswordDto);
-
-                if (!result)
+                var userIdString = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (!Guid.TryParse(userIdString, out var userId))
                 {
-                    return BadRequest(ApiResponseDto<object>.ErrorResponse(
-                        "Failed to change password"));
+                    return Unauthorized();
                 }
 
-                return Ok(ApiResponseDto<object>.SuccessResponse(
-                    null,
-                    "Password changed successfully"));
-            }
-            catch (UnauthorizedAccessException ex)
-            {
-                return BadRequest(ApiResponseDto<object>.ErrorResponse(ex.Message));
+                var user = await _context.Users.FindAsync(userId);
+                if (user == null)
+                {
+                    return NotFound(new { success = false, message = "Usuario no encontrado" });
+                }
+
+                return Ok(new
+                {
+                    success = true,
+                    data = MapUserToDto(user)
+                });
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error changing password");
-                return StatusCode(500, ApiResponseDto<object>.ErrorResponse(
-                    "An error occurred changing password"));
+                _logger.LogError(ex, "Error obteniendo usuario actual");
+                return StatusCode(500, new { success = false, message = "Error al obtener información del usuario" });
             }
         }
 
-        /// <summary>
-        /// Validate if username is available
-        /// </summary>
+        // GET: api/auth/validate-username/{username}
         [HttpGet("validate-username/{username}")]
-        [ProducesResponseType(typeof(object), 200)]
+        [AllowAnonymous]
         public async Task<IActionResult> ValidateUsername(string username)
         {
-            var isAvailable = await _authService.ValidateUsernameAsync(username);
-            return Ok(new { available = isAvailable });
+            try
+            {
+                var exists = await _context.Users
+                    .AnyAsync(u => u.Username.ToLower() == username.ToLower());
+
+                return Ok(new { available = !exists });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error validando username: {Username}", username);
+                return Ok(new { available = false });
+            }
         }
 
-        /// <summary>
-        /// Validate if email is available
-        /// </summary>
+        // GET: api/auth/validate-email/{email}
         [HttpGet("validate-email/{email}")]
-        [ProducesResponseType(typeof(object), 200)]
+        [AllowAnonymous]
         public async Task<IActionResult> ValidateEmail(string email)
         {
-            var isAvailable = await _authService.ValidateEmailAsync(email);
-            return Ok(new { available = isAvailable });
-        }
-
-        /// <summary>
-        /// Confirm email address
-        /// </summary>
-        [HttpPost("confirm-email")]
-        [ProducesResponseType(typeof(ApiResponseDto<object>), 200)]
-        [ProducesResponseType(typeof(ApiResponseDto<object>), 400)]
-        public async Task<IActionResult> ConfirmEmail([FromQuery] string email, [FromQuery] string token)
-        {
             try
             {
-                var result = await _authService.ConfirmEmailAsync(email, token);
+                var exists = await _context.Users
+                    .AnyAsync(u => u.Email.ToLower() == email.ToLower());
 
-                if (!result)
-                {
-                    return BadRequest(ApiResponseDto<object>.ErrorResponse(
-                        "Invalid confirmation token"));
-                }
-
-                return Ok(ApiResponseDto<object>.SuccessResponse(
-                    null,
-                    "Email confirmed successfully"));
+                return Ok(new { available = !exists });
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error confirming email");
-                return StatusCode(500, ApiResponseDto<object>.ErrorResponse(
-                    "An error occurred confirming email"));
+                _logger.LogError(ex, "Error validando email: {Email}", email);
+                return Ok(new { available = false });
             }
         }
 
-        /// <summary>
-        /// Enable two-factor authentication
-        /// </summary>
-        [HttpPost("enable-2fa")]
-        [Authorize]
-        [ProducesResponseType(typeof(ApiResponseDto<object>), 200)]
-        public async Task<IActionResult> EnableTwoFactor([FromBody] EnableTwoFactorDto dto)
+        // GET: api/auth/test-db
+        [HttpGet("test-db")]
+        [AllowAnonymous]
+        public async Task<IActionResult> TestDatabase()
         {
             try
             {
-                var userId = Guid.Parse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? "");
-                var result = await _authService.EnableTwoFactorAsync(userId, dto);
+                var userCount = await _context.Users.CountAsync();
+                var users = await _context.Users
+                    .Select(u => new
+                    {
+                        u.Id,
+                        u.Username,
+                        u.Email,
+                        HasPassword = !string.IsNullOrEmpty(u.PasswordHash),
+                        u.CreatedAt
+                    })
+                    .Take(5)
+                    .ToListAsync();
 
-                if (!result)
+                var jwtKey = _configuration["Jwt:Secret"] ?? _configuration["Jwt:Key"];
+
+                return Ok(new
                 {
-                    return BadRequest(ApiResponseDto<object>.ErrorResponse(
-                        "Failed to enable two-factor authentication"));
-                }
-
-                return Ok(ApiResponseDto<object>.SuccessResponse(
-                    null,
-                    "Two-factor authentication enabled successfully"));
+                    success = true,
+                    userCount,
+                    users,
+                    databaseConnection = "OK",
+                    jwtConfigured = !string.IsNullOrEmpty(jwtKey),
+                    jwtKeyLength = jwtKey?.Length ?? 0,
+                    timestamp = DateTime.UtcNow
+                });
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error enabling 2FA");
-                return StatusCode(500, ApiResponseDto<object>.ErrorResponse(
-                    "An error occurred enabling two-factor authentication"));
+                _logger.LogError(ex, "Error en test-db");
+                return StatusCode(500, new
+                {
+                    success = false,
+                    error = ex.Message,
+                    innerError = ex.InnerException?.Message
+                });
             }
         }
 
+        // Métodos privados auxiliares
+        private string HashPassword(string password)
+        {
+            try
+            {
+                var jwtKey = _configuration["Jwt:Secret"] ?? _configuration["Jwt:Key"];
 
+                if (string.IsNullOrEmpty(jwtKey))
+                {
+                    _logger.LogError("JWT Secret/Key no configurado en appsettings.json");
+                    throw new InvalidOperationException("JWT key not configured");
+                }
 
+                using var sha256 = SHA256.Create();
+                var saltedPassword = password + jwtKey;
+                var hashedBytes = sha256.ComputeHash(Encoding.UTF8.GetBytes(saltedPassword));
+                return Convert.ToBase64String(hashedBytes);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error al hashear contraseña");
+                throw;
+            }
+        }
 
+        private bool VerifyPassword(string password, string hash)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(hash))
+                {
+                    _logger.LogError("Hash de contraseña es null o vacío");
+                    return false;
+                }
 
+                var passwordHash = HashPassword(password);
+                var result = passwordHash == hash;
+
+                // Log para debug (remover en producción)
+                if (!result)
+                {
+                    _logger.LogDebug("Hash esperado: {Expected}", hash.Substring(0, Math.Min(10, hash.Length)));
+                    _logger.LogDebug("Hash calculado: {Calculated}", passwordHash.Substring(0, Math.Min(10, passwordHash.Length)));
+                }
+
+                return result;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error al verificar contraseña");
+                return false;
+            }
+        }
+
+        private UserDto MapUserToDto(User user)
+        {
+            return new UserDto
+            {
+                Id = user.Id.ToString(),
+                Username = user.Username,
+                Email = user.Email,
+                DisplayName = user.DisplayName,
+                ProfileImageUrl = user.ProfileImageUrl,
+                CoverImageUrl = user.CoverImageUrl,
+                Bio = user.Bio,
+                IsCreator = user.IsCreator,
+                IsVerified = user.IsVerified,
+                EmailConfirmed = user.EmailConfirmed,
+                SubscriptionPrice = user.SubscriptionPrice,
+                MessagePrice = user.MessagePrice,
+                Currency = user.Currency ?? "USD",
+                FollowersCount = user.FollowersCount,
+                FollowingCount = user.FollowingCount,
+                PostsCount = user.PostsCount
+            };
+        }
     }
 }
