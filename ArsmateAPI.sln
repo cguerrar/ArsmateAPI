@@ -1,0 +1,37 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.13.35931.197 d17.13
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Arsmate.API", "Arsmate.API\Arsmate.API.csproj", "{1C33F7E6-858D-4097-A603-61AF1EC5772D}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Arsmate.Core", "Arsmate.Core\Arsmate.Core.csproj", "{D313CC3D-937A-4BDF-9E1A-C829A2444D04}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Arsmate.Infrastructure", "Arsmate.Infrastructure\Arsmate.Infrastructure.csproj", "{28DF3347-F590-4D11-998A-7AFE595197B7}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{1C33F7E6-858D-4097-A603-61AF1EC5772D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1C33F7E6-858D-4097-A603-61AF1EC5772D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1C33F7E6-858D-4097-A603-61AF1EC5772D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1C33F7E6-858D-4097-A603-61AF1EC5772D}.Release|Any CPU.Build.0 = Release|Any CPU
+		{D313CC3D-937A-4BDF-9E1A-C829A2444D04}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D313CC3D-937A-4BDF-9E1A-C829A2444D04}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{D313CC3D-937A-4BDF-9E1A-C829A2444D04}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D313CC3D-937A-4BDF-9E1A-C829A2444D04}.Release|Any CPU.Build.0 = Release|Any CPU
+		{28DF3347-F590-4D11-998A-7AFE595197B7}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{28DF3347-F590-4D11-998A-7AFE595197B7}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{28DF3347-F590-4D11-998A-7AFE595197B7}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{28DF3347-F590-4D11-998A-7AFE595197B7}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {14E30D30-FD8F-4756-B2F2-7E6B6B9E8B18}
+	EndGlobalSection
+EndGlobal
