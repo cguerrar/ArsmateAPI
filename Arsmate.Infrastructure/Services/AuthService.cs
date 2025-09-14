@@ -192,34 +192,43 @@ namespace Arsmate.Infrastructure.Services
         {
             try
             {
+                _logger.LogInformation($"Login attempt for: {loginDto.EmailOrUsername}");
+
+                // CORRECCIÓN: Cambiar UsernameOrEmail por EmailOrUsername
                 // Find user by email or username
                 var user = await _context.Users
                     .FirstOrDefaultAsync(u =>
-                        u.Email.ToLower() == loginDto.UsernameOrEmail.ToLower() ||
-                        u.Username.ToLower() == loginDto.UsernameOrEmail.ToLower());
+                        u.Email.ToLower() == loginDto.EmailOrUsername.ToLower() ||
+                        u.Username.ToLower() == loginDto.EmailOrUsername.ToLower());
 
                 if (user == null)
                 {
+                    _logger.LogWarning($"User not found: {loginDto.EmailOrUsername}");
                     throw new UnauthorizedAccessException("Invalid credentials");
                 }
 
                 // Check if account is active
                 if (!user.IsActive)
                 {
+                    _logger.LogWarning($"Inactive account login attempt: {user.Username}");
                     throw new UnauthorizedAccessException("Account is deactivated");
                 }
 
                 // Check if account is suspended
                 if (user.IsSuspended && user.SuspendedUntil > DateTime.UtcNow)
                 {
+                    _logger.LogWarning($"Suspended account login attempt: {user.Username}");
                     throw new UnauthorizedAccessException($"Account is suspended until {user.SuspendedUntil}");
                 }
 
                 // Verify password using BCrypt
                 if (!BCrypt.Net.BCrypt.Verify(loginDto.Password, user.PasswordHash))
                 {
+                    _logger.LogWarning($"Invalid password for user: {user.Username}");
                     throw new UnauthorizedAccessException("Invalid credentials");
                 }
+
+                _logger.LogInformation($"Login successful for user: {user.Username}");
 
                 // Update last login
                 user.LastLoginAt = DateTime.UtcNow;

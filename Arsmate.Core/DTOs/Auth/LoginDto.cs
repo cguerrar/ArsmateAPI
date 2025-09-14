@@ -1,24 +1,15 @@
 ﻿using System.ComponentModel.DataAnnotations;
 
-namespace Arsmate.Core.DTOs.Auth
+public class LoginDto
 {
-    /// <summary>
-    /// DTO para inicio de sesión
-    /// </summary>
-    public class LoginDto
-    {
-        [Required(ErrorMessage = "El usuario o email es obligatorio")]
-        public string UsernameOrEmail { get; set; }
+    [Required(ErrorMessage = "Email or username is required")]
+    public string EmailOrUsername { get; set; }
 
-        [Required(ErrorMessage = "La contraseña es obligatoria")]
-        public string Password { get; set; }
+    [Required(ErrorMessage = "Password is required")]
+    public string Password { get; set; }
 
-        public bool RememberMe { get; set; }
+    public bool RememberMe { get; set; }
 
-        public string DeviceId { get; set; }
-
-        public string DeviceName { get; set; }
-
-        public string IpAddress { get; set; }
-    }
+    // SIN [Required] aquí
+    public string? IpAddress { get; set; } = "";
 }
