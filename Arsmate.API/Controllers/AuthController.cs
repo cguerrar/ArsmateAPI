@@ -9,6 +9,7 @@ using Arsmate.Core.Entities;
 using Arsmate.Core.Interfaces;
 using Arsmate.Infrastructure.Data;
 using ArsmateAPI.DTOs;
+using Arsmate.Infrastructure.Services;
 
 namespace ArsmateAPI.Controllers
 {
@@ -122,7 +123,7 @@ namespace ArsmateAPI.Controllers
             }
         }
 
-        // POST: api/auth/register
+
         [HttpPost("register")]
         [AllowAnonymous]
         public async Task<IActionResult> Register([FromBody] RegisterDto dto)
@@ -138,7 +139,6 @@ namespace ArsmateAPI.Controllers
                         .SelectMany(x => x.Value.Errors)
                         .Select(x => x.ErrorMessage)
                         .ToList();
-
                     return BadRequest(new AuthResponseDto
                     {
                         Success = false,
@@ -174,7 +174,7 @@ namespace ArsmateAPI.Controllers
                     });
                 }
 
-                // Crear el usuario
+                // Crear el usuario con TODOS los campos requeridos
                 var user = new User
                 {
                     Id = Guid.NewGuid(),
@@ -185,12 +185,66 @@ namespace ArsmateAPI.Controllers
                     IsCreator = dto.IsCreator,
                     IsVerified = false,
                     EmailConfirmed = false,
-                    CreatedAt = DateTime.UtcNow,
-                    UpdatedAt = DateTime.UtcNow,
-                    // Inicializar contadores
+
+                    // CAMPOS CRÍTICOS QUE FALTABAN
+                    EmailConfirmationToken = Guid.NewGuid().ToString(),
+                    EmailConfirmationTokenExpires = DateTime.UtcNow.AddDays(7),
+
+                    // Campos de texto que no pueden ser NULL
+                    Bio = string.Empty,
+                    ProfileImageUrl = "/images/default-avatar.png",
+                    ProfilePictureUrl = "/images/default-avatar.png",
+                    CoverImageUrl = "/images/default-cover.jpg",
+                    CoverPhotoUrl = "/images/default-cover.jpg",
+                    Location = string.Empty,
+                    WebsiteUrl = string.Empty,
+                    InstagramUsername = string.Empty,
+                    TwitterUsername = string.Empty,
+                    TikTokUsername = string.Empty,
+                    YouTubeUrl = string.Empty,
+                    WelcomeMessage = string.Empty,
+                    Currency = "USD",
+                    LastLoginIp = string.Empty,
+                    PasswordResetToken = string.Empty,
+                    TwoFactorSecret = string.Empty,
+                    PushNotificationToken = string.Empty,
+                    SuspensionReason = string.Empty,
+
+                    // Campos booleanos
+                    IsActive = true,
+                    IsSuspended = false,
+                    IsDeleted = false,
+                    ShowActivityStatus = true,
+                    AllowMessages = true,
+                    ShowSubscriberCount = true,
+                    ShowMediaInProfile = true,
+                    ShowPostCount = true,
+                    EmailNotifications = true,
+                    PushNotifications = false,
+                    TwoFactorEnabled = false,
+
+                    // Contadores
                     FollowersCount = 0,
                     FollowingCount = 0,
-                    PostsCount = 0
+                    PostsCount = 0,
+                    LikesCount = 0,
+                    TotalLikesReceived = 0,
+                    ProfileViewsCount = 0,
+
+                    // Fechas
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow,
+
+                    // Campos opcionales (pueden ser null)
+                    DateOfBirth = null,
+                    RefreshToken = null,
+                    RefreshTokenExpiryTime = null,
+                    PasswordResetTokenExpires = null,
+                    LastLoginAt = null,
+                    SuspendedUntil = null,
+                    SubscriptionPrice = dto.IsCreator ? 9.99m : null,
+                    MessagePrice = dto.IsCreator ? 1.99m : null,
+                    WelcomeMessageDiscount = null
                 };
 
                 _context.Users.Add(user);
@@ -201,9 +255,13 @@ namespace ArsmateAPI.Controllers
                 // Generar tokens
                 var accessToken = _tokenService.GenerateAccessToken(user);
                 var refreshToken = _tokenService.GenerateRefreshToken();
-
                 var expiresInMinutes = Convert.ToDouble(_configuration["Jwt:ExpiresInMinutes"] ?? "60");
                 var expiresAt = DateTime.UtcNow.AddMinutes(expiresInMinutes);
+
+                // Actualizar el refresh token en el usuario
+                user.RefreshToken = refreshToken;
+                user.RefreshTokenExpiryTime = DateTime.UtcNow.AddDays(7);
+                await _context.SaveChangesAsync();
 
                 return Ok(new AuthResponseDto
                 {
@@ -229,6 +287,8 @@ namespace ArsmateAPI.Controllers
                 });
             }
         }
+
+
 
         // POST: api/auth/refresh
         [HttpPost("refresh")]

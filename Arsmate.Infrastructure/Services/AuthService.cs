@@ -50,7 +50,7 @@ namespace Arsmate.Infrastructure.Services
                     throw new InvalidOperationException("Email already registered");
                 }
 
-                // Create new user with all required fields as non-null
+                // Create new user with all required fields properly initialized
                 var user = new User
                 {
                     Id = Guid.NewGuid(),
@@ -59,19 +59,19 @@ namespace Arsmate.Infrastructure.Services
                     DisplayName = !string.IsNullOrEmpty(registerDto.DisplayName)
                         ? registerDto.DisplayName
                         : registerDto.Username,
-                    Bio = "",
+                    Bio = string.Empty,  // Ya está bien
                     ProfileImageUrl = "/images/default-avatar.png",
-                    ProfilePictureUrl = "/images/default-avatar.png",
+                    ProfilePictureUrl = "/images/default-avatar.png",  // CORREGIDO: valor por defecto
                     CoverImageUrl = "/images/default-cover.jpg",
-                    CoverPhotoUrl = "/images/default-cover.jpg",
+                    CoverPhotoUrl = "/images/default-cover.jpg",  // CORREGIDO: valor por defecto
                     IsCreator = registerDto.IsCreator,
                     IsVerified = false,
                     EmailConfirmed = false,
-                    EmailConfirmationToken = Guid.NewGuid().ToString(),
+                    EmailConfirmationToken = Guid.NewGuid().ToString(), // YA ESTÁ BIEN
                     EmailConfirmationTokenExpires = DateTime.UtcNow.AddDays(7),
                     DateOfBirth = registerDto.DateOfBirth,
-                    Location = "",
-                    WebsiteUrl = "",
+                    Location = string.Empty,  // CORREGIDO: no puede ser null
+                    WebsiteUrl = string.Empty,  // CORREGIDO: no puede ser null
 
                     // Hash password usando BCrypt
                     PasswordHash = BCrypt.Net.BCrypt.HashPassword(registerDto.Password),
@@ -80,14 +80,14 @@ namespace Arsmate.Infrastructure.Services
                     SubscriptionPrice = registerDto.IsCreator ? 5.00m : null,
                     MessagePrice = registerDto.IsCreator ? 1.00m : null,
                     Currency = "USD",
-                    WelcomeMessage = "",
+                    WelcomeMessage = string.Empty,  // CORREGIDO: no puede ser null
                     WelcomeMessageDiscount = null,
 
-                    // Redes sociales
-                    InstagramUsername = "",
-                    TwitterUsername = "",
-                    TikTokUsername = "",
-                    YouTubeUrl = "",
+                    // Redes sociales - CORREGIDO: no pueden ser null
+                    InstagramUsername = string.Empty,
+                    TwitterUsername = string.Empty,
+                    TikTokUsername = string.Empty,
+                    YouTubeUrl = string.Empty,
 
                     // Estadísticas iniciales
                     FollowersCount = 0,
@@ -107,25 +107,26 @@ namespace Arsmate.Infrastructure.Services
                     // Notificaciones
                     EmailNotifications = true,
                     PushNotifications = true,
-                    PushNotificationToken = "",
+                    PushNotificationToken = string.Empty,  // CORREGIDO: no puede ser null
 
                     // Estado de la cuenta
                     IsActive = true,
                     IsSuspended = false,
+                    IsDeleted = false,  // AÑADIDO: faltaba este campo
                     SuspendedUntil = null,
-                    SuspensionReason = "",
+                    SuspensionReason = string.Empty,  // CORREGIDO: no puede ser null
                     LastLoginAt = null,
-                    LastLoginIp = "",
+                    LastLoginIp = string.Empty,  // CORREGIDO: no puede ser null
 
-                    // Tokens
-                    RefreshToken = "",
+                    // Tokens - CORREGIDO: inicializar con valores vacíos pero no null
+                    RefreshToken = null,  // Puede ser null hasta que se genere
                     RefreshTokenExpiryTime = null,
-                    PasswordResetToken = "",
+                    PasswordResetToken = string.Empty,  // CORREGIDO: no puede ser null
                     PasswordResetTokenExpires = null,
 
                     // Two Factor
                     TwoFactorEnabled = false,
-                    TwoFactorSecret = "",
+                    TwoFactorSecret = string.Empty,  // CORREGIDO: no puede ser null
 
                     // Timestamps
                     CreatedAt = DateTime.UtcNow,
@@ -161,9 +162,9 @@ namespace Arsmate.Infrastructure.Services
                     TotalPPVEarned = 0,
                     MinimumWithdrawalAmount = 20,
                     Currency = "USD",
-                    PayPalEmail = "",
-                    BankAccountInfo = "", // Agregar este campo
-                    StripeAccountId = "", // Posiblemente necesario también
+                    PayPalEmail = string.Empty,  // CORREGIDO: no puede ser null
+                    BankAccountInfo = string.Empty,  // CORREGIDO: no puede ser null
+                    StripeAccountId = string.Empty,  // CORREGIDO: no puede ser null
                     CreatedAt = DateTime.UtcNow,
                     UpdatedAt = DateTime.UtcNow
                 };
@@ -194,7 +195,6 @@ namespace Arsmate.Infrastructure.Services
             {
                 _logger.LogInformation($"Login attempt for: {loginDto.EmailOrUsername}");
 
-                // CORRECCIÓN: Cambiar UsernameOrEmail por EmailOrUsername
                 // Find user by email or username
                 var user = await _context.Users
                     .FirstOrDefaultAsync(u =>
@@ -232,7 +232,7 @@ namespace Arsmate.Infrastructure.Services
 
                 // Update last login
                 user.LastLoginAt = DateTime.UtcNow;
-                user.LastLoginIp = loginDto.IpAddress ?? "";
+                user.LastLoginIp = loginDto.IpAddress ?? string.Empty;  // CORREGIDO: no puede ser null
 
                 // Generate tokens
                 var accessToken = _tokenService.GenerateAccessToken(user);
@@ -298,7 +298,7 @@ namespace Arsmate.Infrastructure.Services
 
             if (user != null)
             {
-                user.RefreshToken = "";
+                user.RefreshToken = null;  // CORREGIDO: puede ser null
                 user.RefreshTokenExpiryTime = null;
                 await _context.SaveChangesAsync();
                 return true;
@@ -339,7 +339,7 @@ namespace Arsmate.Infrastructure.Services
             }
 
             user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(resetPasswordDto.NewPassword);
-            user.PasswordResetToken = "";
+            user.PasswordResetToken = string.Empty;  // CORREGIDO: no puede ser null
             user.PasswordResetTokenExpires = null;
             user.UpdatedAt = DateTime.UtcNow;
             await _context.SaveChangesAsync();
@@ -380,7 +380,7 @@ namespace Arsmate.Infrastructure.Services
             }
 
             user.EmailConfirmed = true;
-            user.EmailConfirmationToken = "";
+            user.EmailConfirmationToken = string.Empty;  // CORREGIDO: no puede ser null
             user.EmailConfirmationTokenExpires = null;
             user.UpdatedAt = DateTime.UtcNow;
             await _context.SaveChangesAsync();
@@ -433,7 +433,7 @@ namespace Arsmate.Infrastructure.Services
 
             // TODO: Verify password or 2FA code before disabling
             user.TwoFactorEnabled = false;
-            user.TwoFactorSecret = "";
+            user.TwoFactorSecret = string.Empty;  // CORREGIDO: no puede ser null
             user.UpdatedAt = DateTime.UtcNow;
             await _context.SaveChangesAsync();
 

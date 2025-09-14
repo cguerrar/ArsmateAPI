@@ -1,4 +1,4 @@
-using System.Text;
+锘縰sing System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -65,7 +65,10 @@ builder.Services.AddSwaggerGen(c =>
 
 // Configure Entity Framework
 builder.Services.AddDbContext<ArsmateDbContext>(options =>
-    options.UseSqlite(builder.Configuration.GetConnectionString("DefaultConnection")));
+    options.UseSqlite(
+        builder.Configuration.GetConnectionString("DefaultConnection"),
+        b => b.MigrationsAssembly("Arsmate.API") // <-- A脩ADE ESTA L脥NEA
+    ));
 
 // Configure JWT Authentication
 var jwtSecret = builder.Configuration["Jwt:Secret"] ?? builder.Configuration["Jwt:Key"];
@@ -120,48 +123,61 @@ builder.Services.AddAuthentication(options =>
 // Configure Authorization Policies
 builder.Services.AddAuthorization(options =>
 {
-    // Pol韙ica para creadores de contenido
+    // Pol铆tica para creadores de contenido
     options.AddPolicy("CreatorOnly", policy =>
         policy.RequireAssertion(context =>
             context.User.HasClaim(c => c.Type == "IsCreator" && c.Value.Equals("true", StringComparison.OrdinalIgnoreCase))));
 
-    // Pol韙ica para administradores
+    // Pol铆tica para administradores
     options.AddPolicy("AdminOnly", policy =>
         policy.RequireAssertion(context =>
             context.User.HasClaim(c => c.Type == "Role" && c.Value.Equals("Admin", StringComparison.OrdinalIgnoreCase))));
 
-    // Pol韙ica para usuarios verificados
+    // Pol铆tica para usuarios verificados
     options.AddPolicy("VerifiedOnly", policy =>
         policy.RequireClaim("IsVerified", "true"));
 });
 
-// Configure CORS - Versi髇 permisiva para desarrollo
+// ============================================
+// CORS CONFIGURATION - CORREGIDO
+// ============================================
 if (builder.Environment.IsDevelopment())
 {
     builder.Services.AddCors(options =>
     {
-        options.AddDefaultPolicy(builder =>
+        options.AddDefaultPolicy(policy =>
         {
-            builder.AllowAnyOrigin()
-                   .AllowAnyMethod()
-                   .AllowAnyHeader();
+            policy.WithOrigins(
+                    "http://localhost:3000",      // Next.js default port
+                    "http://localhost:3001",      // Next.js alternate port
+                    "https://localhost:3000",     // Next.js with HTTPS
+                    "http://127.0.0.1:3000",     // Local IP
+                    "http://localhost:5173",      // Vite default port (si usas Vite)
+                    "http://localhost:4200"       // Angular default port (si usas Angular)
+                )
+                .AllowAnyMethod()
+                .AllowAnyHeader()
+                .AllowCredentials()  // IMPORTANTE: Necesario para cookies y autenticaci贸n
+                .WithExposedHeaders("Content-Disposition"); // Para descargas de archivos
         });
     });
 }
 else
 {
-    // En producci髇, ser m醩 restrictivo
+    // En producci贸n, ser m谩s restrictivo
     builder.Services.AddCors(options =>
     {
         options.AddPolicy("ArsmatePolicy", policy =>
         {
             policy.WithOrigins(
-                "https://arsmate.com",
-                "https://www.arsmate.com",
-                "https://app.arsmate.com")
+                    "https://arsmate.com",
+                    "https://www.arsmate.com",
+                    "https://app.arsmate.com"
+                )
                 .AllowAnyHeader()
                 .AllowAnyMethod()
-                .AllowCredentials();
+                .AllowCredentials()
+                .WithExposedHeaders("Content-Disposition");
         });
     });
 }
@@ -193,7 +209,7 @@ builder.Services.AddResponseCaching();
 // Configure Rate Limiting
 builder.Services.AddRateLimiter(options =>
 {
-    // L韒ite global
+    // L铆mite global
     options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(
         httpContext => RateLimitPartition.GetFixedWindowLimiter(
             partitionKey: httpContext.User?.Identity?.Name ?? httpContext.Request.Headers.Host.ToString(),
@@ -204,7 +220,7 @@ builder.Services.AddRateLimiter(options =>
                 Window = TimeSpan.FromMinutes(1)
             }));
 
-    // L韒ite espec韋ico para creaci髇 de contenido
+    // L铆mite espec铆fico para creaci贸n de contenido
     options.AddPolicy("ContentCreation", httpContext =>
         RateLimitPartition.GetFixedWindowLimiter(
             partitionKey: httpContext.User?.Identity?.Name ?? "anonymous",
@@ -215,7 +231,7 @@ builder.Services.AddRateLimiter(options =>
                 Window = TimeSpan.FromMinutes(1)
             }));
 
-    // L韒ite para uploads de archivos
+    // L铆mite para uploads de archivos
     options.AddPolicy("FileUpload", httpContext =>
         RateLimitPartition.GetFixedWindowLimiter(
             partitionKey: httpContext.User?.Identity?.Name ?? "anonymous",
@@ -257,17 +273,21 @@ if (builder.Environment.IsDevelopment())
     builder.Logging.AddFilter("Microsoft.EntityFrameworkCore.Database.Command", LogLevel.Information);
 }
 
-// Build the app
+// ============================================
+// BUILD THE APPLICATION
+// ============================================
 var app = builder.Build();
 
-// Configure the HTTP request pipeline
+// ============================================
+// CONFIGURE THE HTTP REQUEST PIPELINE
+// ============================================
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
     app.UseSwaggerUI(c =>
     {
         c.SwaggerEndpoint("/swagger/v1/swagger.json", "Arsmate API V1");
-        c.RoutePrefix = string.Empty; // Swagger en la ra韟
+        c.RoutePrefix = string.Empty; // Swagger en la ra铆z
         c.DocumentTitle = "Arsmate API Documentation";
         c.DocExpansion(Swashbuckle.AspNetCore.SwaggerUI.DocExpansion.None);
         c.DefaultModelsExpandDepth(-1); // Ocultar modelos por defecto
@@ -277,21 +297,23 @@ if (app.Environment.IsDevelopment())
 }
 else
 {
-    // En producci髇, usar HSTS
+    // En producci贸n, usar HSTS
     app.UseHsts();
 }
 
-// Orden importante del middleware
+// ============================================
+// MIDDLEWARE PIPELINE - ORDEN IMPORTANTE
+// ============================================
 app.UseHttpsRedirection();
 
-// CORS debe ir ANTES de Authentication
+// CORS debe ir ANTES de Authentication y Authorization
 if (app.Environment.IsDevelopment())
 {
-    app.UseCors(); // Usa la pol韙ica por defecto (AllowAnyOrigin)
+    app.UseCors(); // Usa la pol铆tica por defecto configurada arriba
 }
 else
 {
-    app.UseCors("ArsmatePolicy"); // Usa la pol韙ica restrictiva en producci髇
+    app.UseCors("ArsmatePolicy"); // Usa la pol铆tica restrictiva en producci贸n
 }
 
 app.UseResponseCaching();
@@ -300,19 +322,11 @@ app.UseRateLimiter();
 // Custom middleware - Manejo de errores global
 app.UseMiddleware<ErrorHandlingMiddleware>();
 
+// Authentication y Authorization DESPU脡S de CORS
 app.UseAuthentication();
 app.UseAuthorization();
 
-// Health check endpoint
-app.MapGet("/api/health", () => new
-{
-    status = "OK",
-    timestamp = DateTime.UtcNow,
-    environment = app.Environment.EnvironmentName,
-    version = "1.0.0"
-})
-.WithName("Health")
-.AllowAnonymous();
+
 
 // Map Controllers
 app.MapControllers();
@@ -321,7 +335,9 @@ app.MapControllers();
 app.MapHub<NotificationHub>("/hubs/notifications");
 app.MapHub<ChatHub>("/hubs/chat");
 
-// Apply migrations automatically in development
+// ============================================
+// DATABASE INITIALIZATION
+// ============================================
 if (app.Environment.IsDevelopment())
 {
     using var scope = app.Services.CreateScope();
@@ -347,17 +363,28 @@ if (app.Environment.IsDevelopment())
     catch (Exception ex)
     {
         app.Logger.LogError(ex, "An error occurred while migrating the database.");
-        // No lanzar la excepci髇 para permitir que la aplicaci髇 contin鷈
+        // No lanzar la excepci贸n para permitir que la aplicaci贸n contin煤e
     }
 }
 
-// Log startup information
+// ============================================
+// STARTUP LOGGING
+// ============================================
 app.Logger.LogInformation("========================================");
-app.Logger.LogInformation("Arsmate API started successfully");
-app.Logger.LogInformation("Environment: {Environment}", app.Environment.EnvironmentName);
-app.Logger.LogInformation("URL: http://localhost:5212");
-app.Logger.LogInformation("Swagger UI: http://localhost:5212");
-app.Logger.LogInformation("Health Check: http://localhost:5212/api/health");
+app.Logger.LogInformation("馃殌 Arsmate API started successfully");
+app.Logger.LogInformation("馃搷 Environment: {Environment}", app.Environment.EnvironmentName);
+app.Logger.LogInformation("馃寪 HTTP URL: http://localhost:5212");
+app.Logger.LogInformation("馃敀 HTTPS URL: https://localhost:7212");
+app.Logger.LogInformation("馃摎 Swagger UI: https://localhost:7212");
+app.Logger.LogInformation("馃挌 Health Check: https://localhost:7212/api/health");
+app.Logger.LogInformation("馃敡 CORS Origins Allowed:");
+if (app.Environment.IsDevelopment())
+{
+    app.Logger.LogInformation("   - http://localhost:3000 (Next.js)");
+    app.Logger.LogInformation("   - http://localhost:3001");
+    app.Logger.LogInformation("   - https://localhost:3000");
+    app.Logger.LogInformation("   - http://127.0.0.1:3000");
+}
 app.Logger.LogInformation("========================================");
 
 app.Run();
